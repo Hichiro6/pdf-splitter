@@ -3,7 +3,6 @@ import { getCurrentLanguage, LANGUAGES, setLanguage, t } from '../../src/i18n.js
 
 describe('i18n - Core functions', () => {
   beforeEach(() => {
-    // localStorage.clear() via notre polyfill
     if (typeof localStorage !== 'undefined') {
       localStorage.clear();
     }
@@ -21,13 +20,13 @@ describe('i18n - Core functions', () => {
 
   it('traduit les clés basiques en anglais', () => {
     setLanguage('en');
-    expect(t('app.title')).toBe('WaterMark — Secure your documents');
+    expect(t('app.title')).toBe('PDF Splitter — Split your PDF files');
     expect(t('btn.download')).toBe('Download');
   });
 
   it('traduit les clés en français', () => {
     setLanguage('fr');
-    expect(t('app.title')).toBe('WaterMark — Sécurisez vos documents');
+    expect(t('app.title')).toBe('PDF Splitter — Divisez vos fichiers PDF');
     expect(t('btn.download')).toBe('Télécharger');
   });
 
@@ -37,14 +36,13 @@ describe('i18n - Core functions', () => {
 
   it('gère les paramètres de substitution', () => {
     setLanguage('en');
-    const result = t('page.indicator', { num: 1, total: 10 });
-    expect(result).toContain('Page 1');
-    expect(result).toContain('of 10');
+    const result = t('alerts.splitError', { msg: 'parse error' });
+    expect(result).toContain('parse error');
   });
 
   it('persiste la langue dans localStorage', () => {
     setLanguage('de');
-    expect(localStorage.getItem('watermark_lang')).toBe('de');
+    expect(localStorage.getItem('pdfsplitter_lang')).toBe('de');
   });
 });
 
@@ -66,7 +64,7 @@ describe('i18n - Fallback', () => {
   });
 
   it('reste en anglais si langue invalide', () => {
-    setLanguage('invalid'); // setLanguage ignore les langues invalides
+    setLanguage('invalid');
     expect(getCurrentLanguage()).toBe('en');
   });
 

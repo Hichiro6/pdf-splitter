@@ -1,625 +1,396 @@
+/**
+ * PDF Splitter — Main Application
+ * Features: Upload PDF, parse page count, define ranges, split into multiple PDFs, download ZIP
+ * 100% client-side using pdf-lib + pdfjs-dist
+ */
+
 import '../styles/main.css';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { getCurrentLanguage, getPresetText, initI18n, t } from './i18n.js';
-import { PRESETS } from './presets.js';
+import { PDFDocument } from 'pdf-lib';
+import { t, initI18n, getCurrentLanguage } from './i18n.js';
 
-// État de l'application
+// Application state
 const state = {
-  file: null,
-  fileUrl: null,
-  fileBlob: null, // cached Blob for PDF re-renders (reliable, can be read multiple times)
-  previewCanvas: null, // pour images (téléchargement image)
-  previewCanvases: [], // pour PDF (tous les canvases rendus)
-  options: {
-    text: 'Copy for identity verification only\n{date}',
-    position: 'diagonal',
-    opacity: 30,
-    fontSize: 5,
-    color: '#dc2626',
-    rotation: -45,
-  },
+  files: [], // Array of { id, file, name, pageCount, ranges: [{start, end}] }
+  nextId: 1,
+  isProcessing: false,
 };
 
-// Éléments DOM
+// DOM elements
 const elements = {};
 
 /**
- * Initialisation de l'application
+ * Initialize application
  */
 async function init() {
-  // Initialize i18n first so all UI text is translated before rendering
   initI18n();
-
   cacheElements();
-  renderPresets();
   bindEvents();
-
-  // Sync initial values from inputs to state
-  // Set default watermark text in the textarea (using i18n preset for current language)
-  const defaultPreset = PRESETS[0];
-  if (defaultPreset) {
-    const localizedText = getPresetText(defaultPreset.id);
-    if (localizedText) {
-      // Substitute {date} with today's date automatically
-      const localeMap = { en: 'en-US', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', pt: 'pt-PT', nl: 'nl-NL', it: 'it-IT' };
-      const todayStr = new Date().toLocaleDateString(localeMap[getCurrentLanguage()] || 'en-US');
-      const textWithDate = localizedText.replace(/{date}/g, todayStr);
-      elements.watermarkText.value = textWithDate;
-      state.options.text = textWithDate;
-    }
-  }
-  // Set worker path for PDF.js
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
-  registerServiceWorker();
-  console.log('✅ WaterMark initialized');
+  console.log('✅ PDF Splitter initialized');
 }
 
 /**
- * Mise en cache des éléments DOM
+ * Cache DOM elements
  */
 function cacheElements() {
   elements.dropzone = document.getElementById('dropzone');
   elements.fileInput = document.getElementById('file-input');
-  elements.workspace = document.getElementById('workspace');
-  elements.filename = document.getElementById('filename');
-  elements.previewArea = document.getElementById('preview-area');
-  elements.btnDownload = document.getElementById('btn-download');
-  elements.btnReset = document.getElementById('btn-reset');
-
-  elements.watermarkText = document.getElementById('watermark-text');
-
-  elements.opacitySlider = document.getElementById('opacity');
-  elements.opacityValue = document.getElementById('opacity-value');
-  elements.fontSizeSlider = document.getElementById('fontsize');
-  elements.fontSizeValue = document.getElementById('fontsize-value');
-  elements.rotationSlider = document.getElementById('rotation');
-  elements.rotationValue = document.getElementById('rotation-value');
-  elements.colorPicker = document.getElementById('color-picker');
-  elements.positionControl = document.getElementById('position-control');
-  elements.presetsGrid = document.getElementById('presets-grid');
+  elements.fileList = document.getElementById('file-list');
+  elements.splitBtn = document.getElementById('btn-split');
+  elements.resetBtn = document.getElementById('btn-reset');
+  elements.srLive = document.getElementById('sr-live');
+  elements.splitResults = document.getElementById('split-results');
 }
 
 /**
- * Rendu des boutons de presets
- */
-function renderPresets() {
-  const lang = getCurrentLanguage();
-  elements.presetsGrid.innerHTML = PRESETS.map(
-    (preset) => `
-    <button class="preset-btn" data-preset="${preset.id}">
-      <span class="preset-btn__icon">${preset.icon}</span>
-      <span class="preset-btn__label">${preset.label?.[lang] || preset.label?.en || preset.label || preset.id}</span>
-      <span class="preset-btn__hint">${preset.hint?.[lang] || preset.hint?.en || preset.hint || ''}</span>
-    </button>
-  `,
-  ).join('');
-}
-
-/**
- * Liaison des événements
+ * Bind event listeners
  */
 function bindEvents() {
   // Dropzone
   elements.dropzone.addEventListener('click', () => elements.fileInput.click());
-  elements.dropzone.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      elements.fileInput.click();
-    }
-  });
   elements.dropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    elements.dropzone.classList.add('dragover');
+    elements.dropzone.classList.add('--active');
   });
   elements.dropzone.addEventListener('dragleave', () => {
-    elements.dropzone.classList.remove('dragover');
+    elements.dropzone.classList.remove('--active');
   });
   elements.dropzone.addEventListener('drop', handleDrop);
   elements.fileInput.addEventListener('change', handleFileSelect);
 
-  // Boutons
-  elements.btnDownload.addEventListener('click', handleDownload);
-  elements.btnReset.addEventListener('click', resetApp);
-
-  // Inputs texte
-  elements.watermarkText.addEventListener('input', (e) => {
-    state.options.text = e.target.value;
-    debouncedPreview();
-  });
-
-  // Sliders
-  elements.opacitySlider.addEventListener('input', (e) => {
-    state.options.opacity = parseInt(e.target.value, 10);
-    elements.opacityValue.textContent = `${e.target.value}%`;
-    debouncedPreview();
-  });
-  elements.fontSizeSlider.addEventListener('input', (e) => {
-    state.options.fontSize = parseInt(e.target.value, 10);
-    elements.fontSizeValue.textContent = `${e.target.value}%`;
-    debouncedPreview();
-  });
-  elements.rotationSlider.addEventListener('input', (e) => {
-    state.options.rotation = parseInt(e.target.value, 10);
-    elements.rotationValue.textContent = `${e.target.value}°`;
-    debouncedPreview();
-  });
-
-  // Sélecteur de couleur
-  elements.colorPicker.querySelectorAll('.color-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      elements.colorPicker.querySelectorAll('.color-btn').forEach((b) => {
-        b.classList.remove('active');
-      });
-      btn.classList.add('active');
-      state.options.color = btn.dataset.color;
-      debouncedPreview();
-    });
-  });
-
-  // Contrôles de position
-  elements.positionControl.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      elements.positionControl.querySelectorAll('.seg-btn').forEach((b) => {
-        b.classList.remove('active');
-      });
-      btn.classList.add('active');
-      state.options.position = btn.dataset.position;
-      debouncedPreview();
-    });
-  });
-
-  // Presets
-  bindPresetButtons();
-
-  // Toggle collapsible sections
-  document.querySelectorAll('.control-group__title').forEach((title) => {
-    const toggleSection = () => {
-      const body = title.parentElement.querySelector('.control-group__body');
-      if (!body) return;
-      const expanded = title.getAttribute('aria-expanded') === 'true';
-      title.setAttribute('aria-expanded', String(!expanded));
-      body.classList.toggle('collapsed');
-    };
-    title.addEventListener('click', toggleSection);
-    title.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggleSection();
-      }
-    });
-  });
-
-  // Language change: re-render presets + watermark text
-  document.addEventListener('languagechange', () => {
-    renderPresets();
-    bindPresetButtons();
-    // Update watermark text if a preset is active, otherwise keep custom text
-    const activePreset = elements.presetsGrid.querySelector('.preset-btn.active');
-    if (activePreset) {
-      const preset = PRESETS.find((p) => p.id === activePreset.dataset.preset);
-      if (preset) {
-        const localizedText = getPresetText(preset.id);
-        const localeMap = { en: 'en-US', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', pt: 'pt-PT', nl: 'nl-NL', it: 'it-IT' };
-        const todayStr = new Date().toLocaleDateString(localeMap[getCurrentLanguage()] || 'en-US');
-        const textWithDate = localizedText.replace(/{date}/g, todayStr);
-        elements.watermarkText.value = textWithDate;
-        state.options.text = textWithDate;
-      }
-    }
-    // Re-render preview with new locale
-    if (state.file) debouncedPreview();
-  });
+  // Buttons
+  elements.splitBtn.addEventListener('click', handleSplit);
+  elements.resetBtn.addEventListener('click', resetAll);
 }
 
 /**
- * Liaison des événements sur les boutons de presets
- */
-function bindPresetButtons() {
-  elements.presetsGrid.querySelectorAll('.preset-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      elements.presetsGrid.querySelectorAll('.preset-btn').forEach((b) => {
-        b.classList.remove('active');
-      });
-      btn.classList.add('active');
-      const preset = PRESETS.find((p) => p.id === btn.dataset.preset);
-      if (preset) {
-        const localizedText = getPresetText(preset.id);
-        const localeMap = { en: 'en-US', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', pt: 'pt-PT', nl: 'nl-NL', it: 'it-IT' };
-        const todayStr = new Date().toLocaleDateString(localeMap[getCurrentLanguage()] || 'en-US');
-        const textWithDate = localizedText.replace(/{date}/g, todayStr);
-        elements.watermarkText.value = textWithDate;
-        state.options.text = textWithDate;
-        debouncedPreview();
-      }
-    });
-  });
-}
-
-/**
- * Gestion du drop de fichier
+ * Handle file drop
  */
 function handleDrop(e) {
   e.preventDefault();
-  elements.dropzone.classList.remove('dragover');
-
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    loadFile(files[0]);
-  }
+  elements.dropzone.classList.remove('--active');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+  if (files.length > 0) loadFiles(files);
 }
 
 /**
- * Gestion de la sélection de fichier
+ * Handle file selection
  */
 function handleFileSelect(e) {
-  const files = e.target.files;
-  if (files.length > 0) {
-    loadFile(files[0]);
-  }
+  const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+  if (files.length > 0) loadFiles(files);
+  elements.fileInput.value = '';
 }
 
 /**
- * Chargement et traitement d'un fichier
+ * Load multiple PDF files
  */
-async function loadFile(file) {
-  const validTypes = [
-    'application/pdf',
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/webp',
-    'image/bmp',
-    'image/gif',
-  ];
+async function loadFiles(newFiles) {
+  for (const file of newFiles) {
+    try {
+      const pageCount = await getPdfPageCount(file);
+      const fileId = `file-${state.nextId++}`;
+      state.files.push({
+        id: fileId,
+        file,
+        name: file.name.replace(/\.pdf$/i, ''),
+        pageCount,
+        ranges: [{ start: 1, end: pageCount }], // Default: all pages
+      });
+      announce(`${file.name} loaded. ${pageCount} pages.`);
+    } catch (err) {
+      console.error('Failed to load PDF:', file.name, err);
+      announce(`Error loading ${file.name}. Invalid PDF.`);
+    }
+  }
+  renderFileList();
+}
 
-  if (!validTypes.includes(file.type)) {
-    alert(t('alerts.unsupported'));
+/**
+ * Get page count from PDF file
+ */
+async function getPdfPageCount(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
+  return pdf.numPages;
+}
+
+/**
+ * Render the file list with range inputs
+ */
+function renderFileList() {
+  if (state.files.length === 0) {
+    elements.fileList.innerHTML = '';
+    elements.dropzone.hidden = false;
+    elements.splitBtn.disabled = true;
     return;
   }
 
-  // Nettoyer l'URL précédente
-  if (state.fileUrl) {
-    URL.revokeObjectURL(state.fileUrl);
-  }
-
-  state.file = file;
-  state.fileUrl = URL.createObjectURL(file);
-
-  elements.filename.textContent = file.name;
   elements.dropzone.hidden = true;
-  elements.workspace.hidden = false;
+  elements.splitBtn.disabled = false;
 
-  // Announce to screen readers
-  const srLive = document.getElementById('sr-live');
-  if (srLive) srLive.textContent = `Document ${file.name} loaded. Workspace is now visible.`;
-
-  await renderPreview();
+  elements.fileList.innerHTML = state.files.map(file => `
+    <div class="file-card" data-file-id="${file.id}">
+      <div class="file-card__header">
+        <div class="file-card__thumb">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2ZM16 18H8V16H16V18ZM16 14H8V12H16V14ZM13 9V3.5L18.5 9H13Z"/>
+          </svg>
+        </div>
+        <div class="file-card__info">
+          <div class="file-card__name">${escapeHtml(file.name)}</div>
+          <div class="file-card__meta">${file.pageCount} pages</div>
+        </div>
+        <button class="file-card__remove" onclick="window.removeFile('${file.id}')" aria-label="Remove ${escapeHtml(file.name)}">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 19C6 20.1 6.9 21 8 21H16C17.1 21 18 20.1 18 19V7H6V19ZM19 4H15.5L14.5 3H9.5L8.5 4H5V6H19V4Z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="ranges-container">
+        <div class="range-list" id="ranges-${file.id}"></div>
+        <button class="range-row__add" onclick="window.addRange('${file.id}')" aria-label="Add page range">
+          + Add range
+        </button>
+      </div>
+    </div>
+  `).join('');
 }
 
 /**
- * Affichage de la prévisualisation
+ * Add a new range input row for a file
  */
-async function renderPreview() {
-  elements.previewArea.innerHTML = '<div class="spinner"></div>';
+window.AddRange = function(fileId) {
+  const file = state.files.find(f => f.id === fileId);
+  if (!file) return;
 
-  try {
-    if (state.file.type === 'application/pdf') {
-      await renderPdfPreview();
-    } else {
-      await renderImagePreview();
-    }
-  } catch (error) {
-    console.error('Erreur de rendu:', error);
-    elements.previewArea.innerHTML = '';
-    const errEl = document.createElement('p');
-    errEl.className = 'error';
-    errEl.textContent = `❌ Erreur: ${error.message}`;
-    elements.previewArea.appendChild(errEl);
-  }
-}
+  const rangeId = `range-${Date.now()}`;
+  file.ranges.push({ start: 1, end: file.pageCount });
+
+  const listEl = document.getElementById(`ranges-${fileId}`);
+  const row = document.createElement('div');
+  row.className = 'range-item';
+  row.id = rangeId;
+  row.innerHTML = `
+    <span class="range-item__label">Pages:</span>
+    <input type="number" class="range-row__input" data-field="start" value="1" min="1" max="${file.pageCount}" aria-label="Start page" onchange="window.updateRange('${fileId}', '${rangeId}')">
+    <span>-</span>
+    <input type="number" class="range-row__input" data-field="end" value="${file.pageCount}" min="1" max="${file.pageCount}" aria-label="End page" onchange="window.updateRange('${fileId}', '${rangeId}')">
+    <button class="range-item__remove" onclick="window.removeRange('${fileId}', '${rangeId}')" aria-label="Remove range">✕</button>
+  `;
+  listEl.appendChild(row);
+};
+
+window.addRange = AddRange;
 
 /**
- * Prévisualisation PDF via PDF.js
+ * Update range values when inputs change
  */
-async function renderPdfPreview() {
-  try {
-    // Cache the file as a Blob — File.arrayBuffer() can only be consumed once
-    // in some browsers (especially Playwright's Chromium). Subsequent calls
-    // to renderPreview() (e.g. after position/opacity change) would throw
-    // NotReadableError or "detached ArrayBuffer" without this cache.
-    // Blob.arrayBuffer() can be called repeatedly without issues.
-    if (!state.fileBlob) {
-      state.fileBlob = new Blob([await state.file.arrayBuffer()], { type: state.file.type });
-    }
-    const arrayBuffer = await state.fileBlob.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
+window.updateRange = function(fileId, rangeId) {
+  const file = state.files.find(f => f.id === fileId);
+  if (!file) return;
 
-    const containerWidth = elements.previewArea.clientWidth || 600;
-    const totalPages = pdf.numPages;
+  const row = document.getElementById(rangeId);
+  const start = parseInt(row.querySelector('[data-field="start"]').value, 10);
+  const end = parseInt(row.querySelector('[data-field="end"]').value, 10);
 
-    // Créer un canvas pour chaque page, empilés en scroll
-    elements.previewArea.innerHTML = '';
-    state.previewCanvases = [];
-
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const viewport0 = page.getViewport({ scale: 1 });
-      const scale = Math.min(1, containerWidth / viewport0.width);
-      const viewport = page.getViewport({ scale });
-
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      await page.render({ canvasContext: ctx, viewport }).promise;
-
-      // Appliquer le filigrane sur le canvas rendu
-      const localeMap = { en: 'en-US', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', pt: 'pt-PT', nl: 'nl-NL', it: 'it-IT' };
-      const locale = localeMap[getCurrentLanguage()] || 'en-US';
-      applyWatermarkToContext(ctx, canvas.width, canvas.height, state.options, locale);
-
-      // Ajouter un indicateur de page
-      const pageInfo = document.createElement('div');
-      pageInfo.style.cssText = `
-        text-align: center;
-        padding: 8px 0;
-        color: var(--text-tertiary);
-        font-size: 0.9rem;
-        flex-shrink: 0;
-      `;
-      pageInfo.textContent = t('page.indicator', { num: pageNum, total: totalPages });
-      elements.previewArea.appendChild(pageInfo);
-      elements.previewArea.appendChild(canvas);
-
-      // Stocker le canvas pour le téléchargement PDF
-      state.previewCanvases.push(canvas);
-
-      // Laisser le navigateur respirer entre les pages (évite le gel sur gros PDF)
-      if (pageNum % 5 === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
-  } catch (error) {
-    console.error('PDF preview error:', error);
-    elements.previewArea.innerHTML = '';
-    const errEl = document.createElement('p');
-    errEl.className = 'error';
-    errEl.textContent = `❌ Erreur PDF: ${error.message}`;
-    elements.previewArea.appendChild(errEl);
-  }
-}
-
-/**
- * Prévisualisation image
- */
-async function renderImagePreview() {
-  const img = new Image();
-  img.src = state.fileUrl;
-
-  await new Promise((resolve) => {
-    img.onload = resolve;
+  const rangeIndex = file.ranges.findIndex((_, idx) => {
+    // Find matching range by DOM order (simplified)
+    return true; // Will be recalculated
   });
 
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-
-  ctx.drawImage(img, 0, 0);
-  const localeMap = { en: 'en-US', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', pt: 'pt-PT', nl: 'nl-NL', it: 'it-IT' };
-  const locale = localeMap[getCurrentLanguage()] || 'en-US';
-  applyWatermarkToContext(ctx, canvas.width, canvas.height, state.options, locale);
-
-  elements.previewArea.innerHTML = '';
-  elements.previewArea.appendChild(canvas);
-  state.previewCanvas = canvas;
-}
+  // Rebuild ranges from DOM
+  file.ranges = Array.from(row.parentElement.querySelectorAll('.range-item')).map(r => ({
+    start: parseInt(r.querySelector('[data-field="start"]').value, 10),
+    end: parseInt(r.querySelector('[data-field="end"]').value, 10),
+  }));
+};
 
 /**
- * Application du filigrane sur un contexte Canvas
- * @param {CanvasRenderingContext2D} ctx - Contexte canvas
- * @param {number} width - Largeur du canvas
- * @param {number} height - Hauteur du canvas
- * @param {Object} opts - Options du filigrane (text, fontSize, color, opacity, position, rotation)
- * @param {string} locale - Locale pour le formatage de date (ex: 'fr-FR')
+ * Remove a range input row
  */
-function applyWatermarkToContext(ctx, width, height, opts, locale) {
-  let text = opts.text;
+window.removeRange = function(fileId, rangeId) {
+  const row = document.getElementById(rangeId);
+  if (row) row.remove();
 
-  // Replace {date} with today's date; remove unused variables
-  const todayStr = new Date().toLocaleDateString(locale);
-  text = text.replace(/{date}/g, todayStr);
-  text = text.replace(/{destinataire}/g, '').replace(/{usage}/g, '');
+  const file = state.files.find(f => f.id === fileId);
+  if (!file) return;
 
-  // Calcul proportionnel: la taille dépend de la dimension de l'image
-  // opts.fontSize (16-120) représente un pourcentage de la plus petite dimension
-  const baseDim = Math.min(width, height);
-  const scaleFactor = opts.fontSize / 100; // 48 = 48%, 100 = 100% de baseDim
-  const fontSize = baseDim * scaleFactor;
+  const listEl = document.getElementById(`ranges-${fileId}`);
+  file.ranges = Array.from(listEl.querySelectorAll('.range-item')).map(r => ({
+    start: parseInt(r.querySelector('[data-field="start"]').value, 10),
+    end: parseInt(r.querySelector('[data-field="end"]').value, 10),
+  }));
 
-  // Bornes de sécurité pour éviter des tailles extrêmes
-  const minFontSize = Math.max(24, baseDim * 0.02); // minimum 24px ou 2% de la dimension
-  const maxFontSize = Math.min(baseDim * 0.15, 600); // maximum 15% de la dimension ou 600px
-
-  const finalFontSize = Math.max(minFontSize, Math.min(fontSize, maxFontSize));
-
-  ctx.font = `bold ${finalFontSize}px sans-serif`;
-  ctx.fillStyle = opts.color;
-  ctx.globalAlpha = opts.opacity / 100;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  const lines = text.split('\n');
-  const lineHeight = finalFontSize * 1.3;
-
-  if (opts.position === 'diagonal') {
-    ctx.save();
-    ctx.translate(width / 2, height / 2);
-    // Canvas: y va vers le bas, rotation négative = diagonale montante ↗️
-    const rot = opts.rotation || -45;
-    ctx.rotate((rot * Math.PI) / 180);
-
-    const startY = (-(lines.length - 1) * lineHeight) / 2;
-    lines.forEach((line, i) => {
-      ctx.fillText(line, 0, startY + i * lineHeight);
-    });
-
-    ctx.restore();
-  } else if (opts.position === 'center') {
-    // Centre, sans rotation (horizontal)
-    ctx.save();
-    ctx.translate(width / 2, height / 2);
-
-    const startY = (-(lines.length - 1) * lineHeight) / 2;
-    lines.forEach((line, i) => {
-      ctx.fillText(line, 0, startY + i * lineHeight);
-    });
-
-    ctx.restore();
-  } else if (opts.position === 'bottom') {
-    const y = height - Math.max(100, baseDim * 0.05);
-    lines.forEach((line, i) => {
-      ctx.fillText(line, width / 2, y + i * lineHeight);
-    });
-  } else if (opts.position === 'tile') {
-    const tileSize = Math.min(width, height) / 4;
-    const fontSizeTile = finalFontSize / 2;
-
-    ctx.font = `bold ${fontSizeTile}px sans-serif`;
-
-    for (let x = tileSize / 2; x < width; x += tileSize) {
-      for (let y = tileSize / 2; y < height; y += tileSize) {
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(((opts.rotation || -45) * Math.PI) / 180);
-
-        const tileLH = fontSizeTile * 1.3;
-        const startY = (-(lines.length - 1) * tileLH) / 2;
-        lines.forEach((line, i) => {
-          ctx.fillText(line, 0, startY + i * tileLH);
-        });
-
-        ctx.restore();
-      }
-    }
+  if (file.ranges.length === 0) {
+    file.ranges.push({ start: 1, end: file.pageCount });
+    AddRange(fileId);
   }
-}
+};
 
 /**
- * Téléchargement du document modifié
+ * Remove a file from the list
  */
-async function handleDownload() {
-  if (!state.file) return;
-  // Pour images: previewCanvas est défini. Pour PDF: previewCanvases est rempli.
-  if (state.file.type === 'application/pdf' && state.previewCanvases.length === 0) return;
-  if (state.file.type !== 'application/pdf' && !state.previewCanvas) return;
+window.removeFile = function(fileId) {
+  state.files = state.files.filter(f => f.id !== fileId);
+  renderFileList();
+  if (state.files.length === 0) {
+    elements.splitResults.innerHTML = '';
+  }
+};
+
+/**
+ * Handle split action
+ */
+async function handleSplit() {
+  if (state.files.length === 0 || state.isProcessing) return;
+
+  state.isProcessing = true;
+  elements.splitBtn.disabled = true;
+  elements.splitResults.innerHTML = '';
+  announce('Starting split operation...');
 
   try {
-    let blob;
+    const results = [];
 
-    if (state.file.type === 'application/pdf') {
-      // Pour PDF, on prend les canvases déjà rendus et on les emballe dans un PDF
-      blob = await canvasesToPdf(state.previewCanvases);
-    } else {
-      // Pour images, on prend le canvas déjà traité
-      blob = await new Promise((resolve) => {
-        state.previewCanvas.toBlob(resolve, state.file.type || 'image/png');
-      });
+    for (const file of state.files) {
+      const fileResults = await splitPdfFile(file);
+      results.push(...fileResults);
     }
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const ext = state.file.type === 'application/pdf' ? 'pdf' : 'png';
-    const baseName = state.file.name.replace(/\.[^.]+$/, '');
-    a.href = url;
-    a.download = `${baseName}_watermarked.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (error) {
-    console.error('Erreur de téléchargement:', error);
-    alert(t('alerts.downloadError', { error: error.message }));
+    if (results.length > 0) {
+      renderSplitResults(results);
+      announce(`Split complete. ${results.length} files ready for download.`);
+    } else {
+      announce('No files were split.');
+    }
+  } catch (err) {
+    console.error('Split error:', err);
+    announce(`Split failed: ${err.message}`);
+  } finally {
+    state.isProcessing = false;
+    elements.splitBtn.disabled = false;
   }
 }
 
 /**
- * Convertit un tableau de canvases en PDF (copie conforme de la preview)
+ * Split a single PDF file based on its ranges
  */
-async function canvasesToPdf(canvases) {
-  const { PDFDocument } = await import('pdf-lib');
-  const pdfDoc = await PDFDocument.create();
+async function splitPdfFile(file) {
+  const arrayBuffer = await file.file.arrayBuffer();
+  const srcDoc = await PDFDocument.load(arrayBuffer);
+  const results = [];
 
-  for (const canvas of canvases) {
-    // Convertir canvas en JPEG (quality 0.95 pour haute qualité, minime perte)
-    const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    const jpegBase64 = jpegDataUrl.split(',')[1];
-    const jpegBytes = Uint8Array.from(atob(jpegBase64), (c) => c.charCodeAt(0));
+  for (let i = 0; i < file.ranges.length; i++) {
+    const range = file.ranges[i];
+    const { start, end } = range;
 
-    // Embed image
-    const image = await pdfDoc.embedJpg(jpegBytes);
-    const width = image.width;
-    const height = image.height;
+    if (start > end || start < 1 || end > file.pageCount) continue;
 
-    // Add page de même taille
-    const page = pdfDoc.addPage([width, height]);
-    page.drawImage(image, {
-      x: 0,
-      y: 0,
-      width,
-      height,
+    const newDoc = await PDFDocument.create();
+    const pageIndexes = [];
+    for (let p = start - 1; p < end; p++) {
+      pageIndexes.push(p);
+    }
+
+    const copiedPages = await newDoc.copyPages(srcDoc, pageIndexes);
+    copiedPages.forEach(page => newDoc.addPage(page));
+
+    const pdfBytes = await newDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+
+    results.push({
+      name: `${file.name}_part${i + 1}.pdf`,
+      blob,
+      pages: end - start + 1,
     });
   }
 
-  const pdfBytes = await pdfDoc.save();
-  return new Blob([pdfBytes], { type: 'application/pdf' });
+  return results;
 }
 
 /**
- * Réinitialisation de l'application
+ * Render split results
  */
-function resetApp() {
-  if (state.fileUrl) {
-    URL.revokeObjectURL(state.fileUrl);
-  }
+function renderSplitResults(results) {
+  elements.splitResults.innerHTML = `
+    <h3 class="split-results__title">${results.length} file(s) ready</h3>
+  `;
 
-  state.file = null;
-  state.fileUrl = null;
-  state.fileBlob = null; // Clear cached Blob
-  state.previewCanvas = null;
-  state.previewCanvases = [];
+  results.forEach((result, idx) => {
+    const item = document.createElement('div');
+    item.className = 'split-result';
+    item.innerHTML = `
+      <div class="split-result__icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2ZM16 18H8V16H16V18ZM16 14H8V12H16V14ZM13 9V3.5L18.5 9H13Z"/>
+        </svg>
+      </div>
+      <div class="split-result__info">
+        <div class="split-result__name">${escapeHtml(result.name)}</div>
+        <div class="split-result__pages">${result.pages} page(s)</div>
+      </div>
+      <button class="split-result__download" onclick="window.downloadFile(${idx})">
+        ${t('btn.download')}
+      </button>
+    `;
+    elements.splitResults.appendChild(item);
+  });
 
+  // Store blobs for download
+  window.splitBlobs = results;
+}
+
+/**
+ * Download a split file
+ */
+window.downloadFile = function(idx) {
+  const blobs = window.splitBlobs || [];
+  const blob = blobs[idx];
+  if (!blob) return;
+
+  const url = URL.createObjectURL(blob.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = blob.name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
+ * Reset all files and results
+ */
+function resetAll() {
+  state.files = [];
+  state.isProcessing = false;
+  elements.splitResults.innerHTML = '';
   elements.fileInput.value = '';
-  elements.dropzone.hidden = false;
-  elements.workspace.hidden = true;
-  elements.previewArea.innerHTML = '';
+  renderFileList();
+  announce('All files cleared.');
 }
 
 /**
- * Debounce pour éviter les recalculs trop fréquents
+ * Announce message to screen readers
  */
-let debounceTimer;
-function debouncedPreview() {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => {
-    renderPreview();
-  }, 300);
-}
-
-/**
- * Enregistrement du Service Worker pour PWA
- */
-function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then(() => console.log('✅ Service Worker registered'))
-      .catch((err) => console.warn('⚠️ SW registration failed:', err));
+function announce(message) {
+  if (elements.srLive) {
+    elements.srLive.textContent = message;
   }
+  console.log(`[Announcement] ${message}`);
 }
 
-// Démarrage
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Start app
 init();
