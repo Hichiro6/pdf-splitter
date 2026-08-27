@@ -54,11 +54,13 @@ function cacheElements() {
  */
 function setupCollapseToggle() {
   const title = elements.splitControlGroup?.querySelector('.control-group__title');
-  if (!title) return;
+  const body = elements.splitControlGroup?.querySelector('.control-group__body');
+  if (!title || !body) return;
 
   title.addEventListener('click', () => {
     const isExpanded = title.getAttribute('aria-expanded') === 'true';
     title.setAttribute('aria-expanded', !isExpanded);
+    body.classList.toggle('collapsed', isExpanded);
   });
 }
 
@@ -242,6 +244,11 @@ function renderFileList() {
     });
   });
 
+  // Render initial ranges for each file
+  state.files.forEach(file => {
+    renderRanges(file);
+  });
+
   // Show preview by default for first file
   if (state.files.length > 0) {
     showPreview(state.files[0].id);
@@ -279,96 +286,110 @@ function showPreview(fileId) {
 }
 
 /**
+ * Render all ranges for a file
+ */
+function renderRanges(file) {
+  const listEl = document.getElementById(`ranges-${file.id}`);
+  if (!listEl) return;
+
+  listEl.innerHTML = '';
+
+  file.ranges.forEach((range, idx) => {
+    const rangeId = `range-${file.id}-${idx}`;
+    const row = document.createElement('div');
+    row.className = 'range-item';
+    row.id = rangeId;
+    row.dataset.rangeId = rangeId;
+    row.innerHTML = `
+      <span class="range-item__label">Pages:</span>
+      <input type="number" class="range-row__input" data-field="start" value="${range.start}" min="1" max="${file.pageCount}" aria-label="Start page">
+      <span>-</span>
+      <input type="number" class="range-row__input" data-field="end" value="${range.end}" min="1" max="${file.pageCount}" aria-label="End page">
+      <span class="range-row__error" style="display: none;"></span>
+      ${file.ranges.length > 1 ? `<button class="range-item__remove" type="button" onclick="window.removeRange('${file.id}', '${rangeId}')" aria-label="Remove range">✕</button>` : ''}
+    `;
+    listEl.appendChild(row);
+
+    // Add validation
+    const startInput = row.querySelector('[data-field="start"]');
+    const endInput = row.querySelector('[data-field="end"]');
+    const errorSpan = row.querySelector('.range-row__error');
+
+    function validateRange() {
+      const start = parseInt(startInput.value, 10);
+      const end = parseInt(endInput.value, 10);
+      let errorMessage = '';
+
+      if (isNaN(start) || start < 1) {
+        errorMessage = 'Start must be ≥ 1';
+      } else if (start > file.pageCount) {
+        errorMessage = `Start cannot exceed ${file.pageCount} pages`;
+      } else if (isNaN(end) || end < 1) {
+        errorMessage = 'End must be ≥ 1';
+      } else if (end > file.pageCount) {
+        errorMessage = `End cannot exceed ${file.pageCount} pages`;
+      } else if (start > end) {
+        errorMessage = `Start (${start}) must be ≤ End (${end})`;
+      }
+
+      if (errorMessage) {
+        startInput.classList.add('range-row__input--error');
+        endInput.classList.add('range-row__input--error');
+        errorSpan.textContent = errorMessage;
+        errorSpan.style.display = 'block';
+        return false;
+      } else {
+        startInput.classList.remove('range-row__input--error');
+        endInput.classList.remove('range-row__input--error');
+        errorSpan.style.display = 'none';
+
+        // Update state
+        range.start = start;
+        range.end = end;
+        return true;
+      }
+    }
+
+    startInput.addEventListener('input', validateRange);
+    endInput.addEventListener('input', validateRange);
+
+    // Initial validation
+    validateRange();
+  });
+}
+
+/**
  * Add a new range input row for a file
  */
 window.addRange = function(fileId) {
   const file = state.files.find(f => f.id === fileId);
   if (!file) return;
 
-  const rangeId = `range-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   file.ranges.push({ start: 1, end: file.pageCount });
-
-  const listEl = document.getElementById(`ranges-${fileId}`);
-  const row = document.createElement('div');
-  row.className = 'range-item';
-  row.id = rangeId;
-  row.dataset.rangeId = rangeId;
-  row.innerHTML = `
-    <span class="range-item__label">Pages:</span>
-    <input type="number" class="range-row__input" data-field="start" value="1" min="1" max="${file.pageCount}" aria-label="Start page">
-    <span>-</span>
-    <input type="number" class="range-row__input" data-field="end" value="${file.pageCount}" min="1" max="${file.pageCount}" aria-label="End page">
-    <span class="range-row__error" style="display: none;"></span>
-    <button class="range-item__remove" type="button" onclick="window.removeRange('${fileId}', '${rangeId}')" aria-label="Remove range">✕</button>
-  `;
-  listEl.appendChild(row);
-
-  // Add validation on input change
-  const startInput = row.querySelector('[data-field="start"]');
-  const endInput = row.querySelector('[data-field="end"]');
-  const errorSpan = row.querySelector('.range-row__error');
-  
-  function validateRange() {
-    const start = parseInt(startInput.value, 10);
-    const end = parseInt(endInput.value, 10);
-    let errorMessage = '';
-
-    if (isNaN(start) || start < 1) {
-      errorMessage = `Start must be ≥ 1`;
-    } else if (start > file.pageCount) {
-      errorMessage = `Start cannot exceed ${file.pageCount} pages`;
-    } else if (isNaN(end) || end < 1) {
-      errorMessage = `End must be ≥ 1`;
-    } else if (end > file.pageCount) {
-      errorMessage = `End cannot exceed ${file.pageCount} pages`;
-    } else if (start > end) {
-      errorMessage = `Start (${start}) must be ≤ End (${end})`;
-    }
-
-    if (errorMessage) {
-      startInput.classList.add('range-row__input--error');
-      endInput.classList.add('range-row__input--error');
-      errorSpan.textContent = errorMessage;
-      errorSpan.style.display = 'block';
-      return false;
-    } else {
-      startInput.classList.remove('range-row__input--error');
-      endInput.classList.remove('range-row__input--error');
-      errorSpan.style.display = 'none';
-      return true;
-    }
-  }
-
-  startInput.addEventListener('input', validateRange);
-  endInput.addEventListener('input', validateRange);
-  
-  // Initial validation
-  validateRange();
+  renderRanges(file);
 };
 
 /**
  * Remove a range input row
  */
 window.removeRange = function(fileId, rangeId) {
-  const row = document.getElementById(rangeId);
-  if (row) row.remove();
-
   const file = state.files.find(f => f.id === fileId);
   if (!file) return;
 
-  const listEl = document.getElementById(`ranges-${fileId}`);
-  const rows = Array.from(listEl.querySelectorAll('.range-item'));
-  
-  // Rebuild ranges from DOM
-  file.ranges = rows.map(r => ({
-    start: parseInt(r.querySelector('[data-field="start"]').value, 10),
-    end: parseInt(r.querySelector('[data-field="end"]').value, 10),
-  }));
+  // Parse index from rangeId format "range-{fileId}-{idx}"
+  const match = rangeId.match(/range-.+-(\d+)$/);
+  const idx = match ? parseInt(match[1], 10) : -1;
 
+  if (idx >= 0 && idx < file.ranges.length) {
+    file.ranges.splice(idx, 1);
+  }
+
+  // Ensure at least one range remains
   if (file.ranges.length === 0) {
     file.ranges.push({ start: 1, end: file.pageCount });
-    addRange(fileId);
   }
+
+  renderRanges(file);
 };
 
 /**
