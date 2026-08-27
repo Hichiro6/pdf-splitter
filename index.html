@@ -29,7 +29,6 @@
         <h1>PDF Splitter</h1>
       </div>
       <p class="header__tagline" data-i18n="header.tagline">Split PDF files in your browser</p>
-      <span class="badge" data-i18n="header.badge">🔒 100% local — your files never leave your browser</span>
     </header>
 
     <!-- Drop zone -->
@@ -48,46 +47,44 @@
 
     <!-- Workspace -->
     <section class="workspace" id="workspace">
-      <!-- File list -->
-      <div class="workspace__files">
-        <div class="file-list" id="file-list" role="list" aria-label="Uploaded files">
-          <!-- File cards generated dynamically -->
+      <!-- Preview area (left) -->
+      <div class="workspace__preview" id="preview-container" hidden>
+        <div class="workspace__preview-header">
+          <span class="filename" id="preview-filename">PDF Preview</span>
+        </div>
+        <div class="workspace__preview-area" id="preview-area">
+          <!-- Preview canvases generated dynamically -->
         </div>
       </div>
 
-      <!-- Controls -->
-      <div class="controls">
-        <div class="control-group">
-          <h3 class="control-group__title" aria-expanded="true">
-            <span data-i18n="controls.split">Split Options</span>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </h3>
-          <div class="control-group__body">
-            <p style="font-size: 0.85rem; color: var(--text-tertiary); margin-bottom: 12px;">
-              Define page ranges for each file. Each range creates a separate PDF.
-            </p>
-            <button class="btn btn--primary btn--full-width" id="btn-split" disabled aria-label="Split PDF">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                <path d="M6 3V15M12 3V15M3 6H9M9 12H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-              <span data-i18n="btn.split">Split PDF</span>
-            </button>
-
-            <button class="btn btn--secondary btn--full-width" id="btn-reset" style="margin-top: 8px;" aria-label="Reset all files">
-              <span data-i18n="btn.reset">Reset</span>
-            </button>
-          </div>
+      <!-- File list & Controls (right) -->
+      <div class="workspace__controls-panel">
+        <!-- File list -->
+        <div class="file-list" id="file-list" role="list" aria-label="Uploaded files">
+          <!-- File cards generated dynamically -->
         </div>
 
-        <!-- Split results -->
-        <div class="control-group">
-          <h3 class="control-group__title" aria-expanded="true">
-            <span data-i18n="controls.results">Results</span>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </h3>
-          <div class="control-group__body">
-            <div class="split-results" id="split-results" role="region" aria-label="Split results">
-              <!-- Results generated dynamically -->
+        <!-- Controls -->
+        <div class="controls">
+          <div class="control-group" id="split-control-group">
+            <button class="control-group__title" aria-expanded="true" type="button">
+              <span data-i18n="controls.split">Split Options</span>
+              <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="control-group__body">
+              <p style="font-size: 0.85rem; color: var(--text-tertiary); margin-bottom: 12px;">
+                Define page ranges for each file. Each range creates a separate PDF.
+              </p>
+              <button class="btn btn--primary btn--full-width" id="btn-split" disabled aria-label="Split PDF">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                  <path d="M6 3V15M12 3V15M3 6H9M9 12H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span data-i18n="btn.split">Split PDF</span>
+              </button>
+
+              <button class="btn btn--secondary btn--full-width" id="btn-reset" style="margin-top: 8px;" aria-label="Reset all files">
+                <span data-i18n="btn.reset">Reset</span>
+              </button>
             </div>
           </div>
         </div>
@@ -96,6 +93,8 @@
 
     <footer class="footer">
       <div class="footer__links">
+        <span class="footer__privacy-badge" data-i18n="header.badge">🔒 100% local — your files never leave your browser</span>
+        <span class="footer__separator">·</span>
         <a href="https://github.com/Hichiro6/pdf-splitter" target="_blank" rel="noopener noreferrer" data-i18n="privacy.link">View on GitHub</a>
         <span class="footer__separator">·</span>
         <a href="https://buymeacoffee.com/hichiro" target="_blank" rel="noopener noreferrer" class="footer__bmc">☕ <span data-i18n="footer.bmc">Buy me a coffee</span></a>

@@ -12,9 +12,10 @@ import { t, initI18n, getCurrentLanguage } from './i18n.js';
 
 // Application state
 const state = {
-  files: [], // Array of { id, file, name, pageCount, ranges: [{start, end}] }
+  files: [], // Array of { id, file, name, pageCount, ranges: [{start, end}], previews: [] }
   nextId: 1,
   isProcessing: false,
+  previewCanvases: [],
 };
 
 // DOM elements
@@ -28,6 +29,7 @@ async function init() {
   cacheElements();
   bindEvents();
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  setupCollapseToggle();
   console.log('✅ PDF Splitter initialized');
 }
 
@@ -41,7 +43,23 @@ function cacheElements() {
   elements.splitBtn = document.getElementById('btn-split');
   elements.resetBtn = document.getElementById('btn-reset');
   elements.srLive = document.getElementById('sr-live');
-  elements.splitResults = document.getElementById('split-results');
+  elements.previewContainer = document.getElementById('preview-container');
+  elements.previewArea = document.getElementById('preview-area');
+  elements.previewFilename = document.getElementById('preview-filename');
+  elements.splitControlGroup = document.getElementById('split-control-group');
+}
+
+/**
+ * Setup collapse/expand functionality for control groups
+ */
+function setupCollapseToggle() {
+  const title = elements.splitControlGroup?.querySelector('.control-group__title');
+  if (!title) return;
+
+  title.addEventListener('click', () => {
+    const isExpanded = title.getAttribute('aria-expanded') === 'true';
+    title.setAttribute('aria-expanded', !isExpanded);
+  });
 }
 
 /**
@@ -92,11 +110,16 @@ async function loadFiles(newFiles) {
     try {
       const pageCount = await getPdfPageCount(file);
       const fileId = `file-${state.nextId++}`;
+      
+      // Generate preview canvases for this PDF
+      const previews = await generatePreviews(file, pageCount);
+      
       state.files.push({
         id: fileId,
         file,
         name: file.name.replace(/\.pdf$/i, ''),
         pageCount,
+        previews,
         ranges: [{ start: 1, end: pageCount }], // Default: all pages
       });
       announce(`${file.name} loaded. ${pageCount} pages.`);
@@ -118,11 +141,48 @@ async function getPdfPageCount(file) {
 }
 
 /**
- * Render the file list with range inputs
+ * Generate preview canvases for all pages of a PDF
+ */
+async function generatePreviews(file, pageCount) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
+  const previews = [];
+  
+  // Render only first few pages to avoid performance issues
+  const maxPreviewPages = Math.min(pageCount, 10);
+  
+  for (let pageNum = 1; pageNum <= maxPreviewPages; pageNum++) {
+    try {
+      const page = await pdf.getPage(pageNum);
+      const scale = 0.5; // Thumbnail scale
+      const viewport = page.getViewport({ scale });
+      
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+      
+      previews.push({ pageNum, canvas });
+    } catch (err) {
+      console.warn(`Failed to render preview for page ${pageNum}:`, err);
+    }
+  }
+  
+  return previews;
+}
+
+/**
+ * Render the file list with range inputs and preview thumbnails
  */
 function renderFileList() {
   if (state.files.length === 0) {
     elements.fileList.innerHTML = '';
+    elements.previewContainer.hidden = true;
     elements.dropzone.hidden = false;
     elements.splitBtn.disabled = true;
     return;
@@ -132,7 +192,7 @@ function renderFileList() {
   elements.splitBtn.disabled = false;
 
   elements.fileList.innerHTML = state.files.map(file => `
-    <div class="file-card" data-file-id="${file.id}">
+    <div class="file-card" data-file-id="${escapeHtml(file.id)}">
       <div class="file-card__header">
         <div class="file-card__thumb">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -149,63 +209,141 @@ function renderFileList() {
           </svg>
         </button>
       </div>
-      <div class="ranges-container">
+      
+      <!-- Preview thumbnails -->
+      <div class="file-preview" data-file-id="${file.id}" onclick="showPreview('${file.id}')">
+        <div class="file-preview__thumbs">
+          ${file.previews.slice(0, 5).map(p => `
+            <div class="preview-thumb">
+              <canvas width="${p.canvas.width}" height="${p.canvas.height}"></canvas>
+            </div>
+          `).join('')}
+          ${file.pageCount > 5 ? `<div class="preview-thumb preview-thumb--more">+${file.pageCount - 5}</div>` : ''}
+        </div>
+        <div class="preview-thumb__label">Click to expand preview</div>
+      </div>
+      
+      <div class="ranges-container" data-file-id="${file.id}">
         <div class="range-list" id="ranges-${file.id}"></div>
-        <button class="range-row__add" onclick="window.addRange('${file.id}')" aria-label="Add page range">
+        <button class="range-row__add" type="button" onclick="window.addRange('${file.id}')" aria-label="Add page range">
           + Add range
         </button>
       </div>
     </div>
   `).join('');
+
+  // Copy preview canvases
+  state.files.forEach(file => {
+    const thumbs = elements.fileList.querySelectorAll(`.file-card[data-file-id="${file.id}"] .preview-thumb canvas`);
+    file.previews.slice(0, Math.min(thumbs.length, 5)).forEach((p, i) => {
+      if (thumbs[i]) {
+        thumbs[i].getContext('2d').drawImage(p.canvas, 0, 0);
+      }
+    });
+  });
+
+  // Show preview by default for first file
+  if (state.files.length > 0) {
+    showPreview(state.files[0].id);
+  }
+}
+
+/**
+ * Show preview for a specific file
+ */
+function showPreview(fileId) {
+  const file = state.files.find(f => f.id === fileId);
+  if (!file) return;
+
+  elements.previewContainer.hidden = false;
+  elements.previewFilename.textContent = `${file.name} (${file.pageCount} pages)`;
+  elements.previewArea.innerHTML = '';
+
+  file.previews.forEach(preview => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'preview-page-wrapper';
+    
+    const pageInfo = document.createElement('span');
+    pageInfo.className = 'preview-page-number';
+    pageInfo.textContent = `Page ${preview.pageNum}`;
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = preview.canvas.width;
+    canvas.height = preview.canvas.height;
+    canvas.getContext('2d').drawImage(preview.canvas, 0, 0);
+    
+    wrapper.appendChild(pageInfo);
+    wrapper.appendChild(canvas);
+    elements.previewArea.appendChild(wrapper);
+  });
 }
 
 /**
  * Add a new range input row for a file
  */
-window.AddRange = function(fileId) {
+window.addRange = function(fileId) {
   const file = state.files.find(f => f.id === fileId);
   if (!file) return;
 
-  const rangeId = `range-${Date.now()}`;
+  const rangeId = `range-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   file.ranges.push({ start: 1, end: file.pageCount });
 
   const listEl = document.getElementById(`ranges-${fileId}`);
   const row = document.createElement('div');
   row.className = 'range-item';
   row.id = rangeId;
+  row.dataset.rangeId = rangeId;
   row.innerHTML = `
     <span class="range-item__label">Pages:</span>
-    <input type="number" class="range-row__input" data-field="start" value="1" min="1" max="${file.pageCount}" aria-label="Start page" onchange="window.updateRange('${fileId}', '${rangeId}')">
+    <input type="number" class="range-row__input" data-field="start" value="1" min="1" max="${file.pageCount}" aria-label="Start page">
     <span>-</span>
-    <input type="number" class="range-row__input" data-field="end" value="${file.pageCount}" min="1" max="${file.pageCount}" aria-label="End page" onchange="window.updateRange('${fileId}', '${rangeId}')">
-    <button class="range-item__remove" onclick="window.removeRange('${fileId}', '${rangeId}')" aria-label="Remove range">✕</button>
+    <input type="number" class="range-row__input" data-field="end" value="${file.pageCount}" min="1" max="${file.pageCount}" aria-label="End page">
+    <span class="range-row__error" style="display: none;"></span>
+    <button class="range-item__remove" type="button" onclick="window.removeRange('${fileId}', '${rangeId}')" aria-label="Remove range">✕</button>
   `;
   listEl.appendChild(row);
-};
 
-window.addRange = AddRange;
+  // Add validation on input change
+  const startInput = row.querySelector('[data-field="start"]');
+  const endInput = row.querySelector('[data-field="end"]');
+  const errorSpan = row.querySelector('.range-row__error');
+  
+  function validateRange() {
+    const start = parseInt(startInput.value, 10);
+    const end = parseInt(endInput.value, 10);
+    let errorMessage = '';
 
-/**
- * Update range values when inputs change
- */
-window.updateRange = function(fileId, rangeId) {
-  const file = state.files.find(f => f.id === fileId);
-  if (!file) return;
+    if (isNaN(start) || start < 1) {
+      errorMessage = `Start must be ≥ 1`;
+    } else if (start > file.pageCount) {
+      errorMessage = `Start cannot exceed ${file.pageCount} pages`;
+    } else if (isNaN(end) || end < 1) {
+      errorMessage = `End must be ≥ 1`;
+    } else if (end > file.pageCount) {
+      errorMessage = `End cannot exceed ${file.pageCount} pages`;
+    } else if (start > end) {
+      errorMessage = `Start (${start}) must be ≤ End (${end})`;
+    }
 
-  const row = document.getElementById(rangeId);
-  const start = parseInt(row.querySelector('[data-field="start"]').value, 10);
-  const end = parseInt(row.querySelector('[data-field="end"]').value, 10);
+    if (errorMessage) {
+      startInput.classList.add('range-row__input--error');
+      endInput.classList.add('range-row__input--error');
+      errorSpan.textContent = errorMessage;
+      errorSpan.style.display = 'block';
+      return false;
+    } else {
+      startInput.classList.remove('range-row__input--error');
+      endInput.classList.remove('range-row__input--error');
+      errorSpan.style.display = 'none';
+      return true;
+    }
+  }
 
-  const rangeIndex = file.ranges.findIndex((_, idx) => {
-    // Find matching range by DOM order (simplified)
-    return true; // Will be recalculated
-  });
-
-  // Rebuild ranges from DOM
-  file.ranges = Array.from(row.parentElement.querySelectorAll('.range-item')).map(r => ({
-    start: parseInt(r.querySelector('[data-field="start"]').value, 10),
-    end: parseInt(r.querySelector('[data-field="end"]').value, 10),
-  }));
+  startInput.addEventListener('input', validateRange);
+  endInput.addEventListener('input', validateRange);
+  
+  // Initial validation
+  validateRange();
 };
 
 /**
@@ -219,14 +357,17 @@ window.removeRange = function(fileId, rangeId) {
   if (!file) return;
 
   const listEl = document.getElementById(`ranges-${fileId}`);
-  file.ranges = Array.from(listEl.querySelectorAll('.range-item')).map(r => ({
+  const rows = Array.from(listEl.querySelectorAll('.range-item'));
+  
+  // Rebuild ranges from DOM
+  file.ranges = rows.map(r => ({
     start: parseInt(r.querySelector('[data-field="start"]').value, 10),
     end: parseInt(r.querySelector('[data-field="end"]').value, 10),
   }));
 
   if (file.ranges.length === 0) {
     file.ranges.push({ start: 1, end: file.pageCount });
-    AddRange(fileId);
+    addRange(fileId);
   }
 };
 
@@ -237,19 +378,34 @@ window.removeFile = function(fileId) {
   state.files = state.files.filter(f => f.id !== fileId);
   renderFileList();
   if (state.files.length === 0) {
-    elements.splitResults.innerHTML = '';
+    elements.previewArea.innerHTML = '';
   }
 };
 
 /**
- * Handle split action
+ * Handle split action with validation
  */
 async function handleSplit() {
   if (state.files.length === 0 || state.isProcessing) return;
 
+  // Validate all ranges first
+  let hasErrors = false;
+  state.files.forEach(file => {
+    file.ranges.forEach((range, idx) => {
+      if (range.start < 1 || range.end > file.pageCount || range.start > range.end) {
+        hasErrors = true;
+      }
+    });
+  });
+
+  if (hasErrors) {
+    announce('Please fix range errors before splitting');
+    alert('Please fix the highlighted range errors before splitting.');
+    return;
+  }
+
   state.isProcessing = true;
   elements.splitBtn.disabled = true;
-  elements.splitResults.innerHTML = '';
   announce('Starting split operation...');
 
   try {
@@ -287,7 +443,11 @@ async function splitPdfFile(file) {
     const range = file.ranges[i];
     const { start, end } = range;
 
-    if (start > end || start < 1 || end > file.pageCount) continue;
+    // Skip invalid ranges
+    if (start > end || start < 1 || end > file.pageCount) {
+      console.warn(`Skipping invalid range: ${start}-${end} for file ${file.name}`);
+      continue;
+    }
 
     const newDoc = await PDFDocument.create();
     const pageIndexes = [];
@@ -305,6 +465,7 @@ async function splitPdfFile(file) {
       name: `${file.name}_part${i + 1}.pdf`,
       blob,
       pages: end - start + 1,
+      range: `${start}-${end}`,
     });
   }
 
@@ -312,35 +473,28 @@ async function splitPdfFile(file) {
 }
 
 /**
- * Render split results
+ * Render split results (simplified - just download button)
  */
 function renderSplitResults(results) {
-  elements.splitResults.innerHTML = `
-    <h3 class="split-results__title">${results.length} file(s) ready</h3>
-  `;
-
-  results.forEach((result, idx) => {
-    const item = document.createElement('div');
-    item.className = 'split-result';
-    item.innerHTML = `
-      <div class="split-result__icon">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2ZM16 18H8V16H16V18ZM16 14H8V12H16V14ZM13 9V3.5L18.5 9H13Z"/>
-        </svg>
-      </div>
-      <div class="split-result__info">
-        <div class="split-result__name">${escapeHtml(result.name)}</div>
-        <div class="split-result__pages">${result.pages} page(s)</div>
-      </div>
-      <button class="split-result__download" onclick="window.downloadFile(${idx})">
-        ${t('btn.download')}
-      </button>
-    `;
-    elements.splitResults.appendChild(item);
-  });
-
   // Store blobs for download
   window.splitBlobs = results;
+  
+  // Show success message in preview area
+  elements.previewArea.innerHTML = `
+    <div class="split-success">
+      <h3>✅ ${results.length} file(s) ready for download</h3>
+      <p>Each range has been split into a separate PDF.</p>
+    </div>
+  `;
+  
+  results.forEach((result, idx) => {
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'btn btn--primary';
+    downloadBtn.style.marginTop = '8px';
+    downloadBtn.onclick = () => downloadFile(idx);
+    downloadBtn.textContent = `Download ${result.name} (${result.pages} pages)`;
+    elements.previewArea.appendChild(downloadBtn);
+  });
 }
 
 /**
@@ -367,7 +521,9 @@ window.downloadFile = function(idx) {
 function resetAll() {
   state.files = [];
   state.isProcessing = false;
-  elements.splitResults.innerHTML = '';
+  state.previewCanvases = [];
+  elements.previewArea.innerHTML = '';
+  elements.previewContainer.hidden = true;
   elements.fileInput.value = '';
   renderFileList();
   announce('All files cleared.');
