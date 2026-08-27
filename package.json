@@ -1,7 +1,7 @@
 {
-  "name": "watermark",
-  "version": "1.0.0",
-  "description": "Security watermark for administrative documents — 100% client-side",
+  "name": "pdf-splitter",
+  "version": "0.1.0",
+  "description": "Split PDF files in your browser. 100% local \u2014 your files never leave your browser.",
   "type": "module",
   "license": "CC-BY-NC-ND-4.0",
   "scripts": {
