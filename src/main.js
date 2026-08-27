@@ -59,8 +59,15 @@ function setupCollapseToggle() {
 
   title.addEventListener('click', () => {
     const isExpanded = title.getAttribute('aria-expanded') === 'true';
+    // Toggle: if currently expanded, collapse it (add collapsed class)
     title.setAttribute('aria-expanded', !isExpanded);
-    body.classList.toggle('collapsed', isExpanded);
+    if (!isExpanded) {
+      // Currently collapsed, expanding it
+      body.classList.remove('collapsed');
+    } else {
+      // Currently expanded, collapsing it
+      body.classList.add('collapsed');
+    }
   });
 }
 
@@ -332,20 +339,22 @@ function renderRanges(file) {
         errorMessage = `Start (${start}) must be ≤ End (${end})`;
       }
 
+      // Always update state so handleSplit checks actual input values
+      range.start = start;
+      range.end = end;
+
       if (errorMessage) {
         startInput.classList.add('range-row__input--error');
         endInput.classList.add('range-row__input--error');
         errorSpan.textContent = errorMessage;
         errorSpan.style.display = 'block';
+        row.dataset.hasError = 'true';
         return false;
       } else {
         startInput.classList.remove('range-row__input--error');
         endInput.classList.remove('range-row__input--error');
         errorSpan.style.display = 'none';
-
-        // Update state
-        range.start = start;
-        range.end = end;
+        row.dataset.hasError = 'false';
         return true;
       }
     }
@@ -413,7 +422,9 @@ async function handleSplit() {
   let hasErrors = false;
   state.files.forEach(file => {
     file.ranges.forEach((range, idx) => {
-      if (range.start < 1 || range.end > file.pageCount || range.start > range.end) {
+      const start = parseInt(range.start, 10);
+      const end = parseInt(range.end, 10);
+      if (isNaN(start) || isNaN(end) || start < 1 || end > file.pageCount || start > end) {
         hasErrors = true;
       }
     });
