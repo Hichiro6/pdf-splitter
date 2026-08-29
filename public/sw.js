@@ -1,11 +1,11 @@
 // WaterMark Service Worker — offline-first cache
 const CACHE_NAME = 'watermark-v1';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.svg',
-  '/styles/main.css',
+  './',
+  './index.html',
+  './manifest.json',
+  './favicon.svg',
+  './styles/main.css',
 ];
 
 // Install: pré-cache les assets critiques

@@ -77,12 +77,18 @@ function setupCollapseToggle() {
 function bindEvents() {
   // Dropzone
   elements.dropzone.addEventListener('click', () => elements.fileInput.click());
+  elements.dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      elements.fileInput.click();
+    }
+  });
   elements.dropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    elements.dropzone.classList.add('--active');
+    elements.dropzone.classList.add('dropzone--active');
   });
   elements.dropzone.addEventListener('dragleave', () => {
-    elements.dropzone.classList.remove('--active');
+    elements.dropzone.classList.remove('dropzone--active');
   });
   elements.dropzone.addEventListener('drop', handleDrop);
   elements.fileInput.addEventListener('change', handleFileSelect);
@@ -90,6 +96,43 @@ function bindEvents() {
   // Buttons
   elements.splitBtn.addEventListener('click', handleSplit);
   elements.resetBtn.addEventListener('click', resetAll);
+
+  // Event delegation for data-action elements (replaces inline onclick handlers)
+  elements.fileList.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+    const fileId = el.dataset.fileId;
+
+    if (action === 'remove-file' && fileId) {
+      removeFile(fileId);
+    } else if (action === 'add-range' && fileId) {
+      addRange(fileId);
+    } else if (action === 'show-preview' && fileId) {
+      showPreview(fileId);
+    } else if (action === 'remove-range' && fileId) {
+      const rangeId = el.dataset.rangeId;
+      if (rangeId) removeRange(fileId, rangeId);
+    }
+  });
+
+  // Keyboard accessibility for file-preview (role="button")
+  elements.fileList.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    e.preventDefault();
+    el.click();
+  });
+
+  // Event delegation for dynamically created download buttons
+  elements.previewArea.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-download-idx]');
+    if (btn) {
+      e.preventDefault();
+      downloadFile(parseInt(btn.dataset.downloadIdx, 10));
+    }
+  });
 }
 
 /**
@@ -97,7 +140,7 @@ function bindEvents() {
  */
 function handleDrop(e) {
   e.preventDefault();
-  elements.dropzone.classList.remove('--active');
+  elements.dropzone.classList.remove('dropzone--active');
   const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
   if (files.length > 0) loadFiles(files);
 }
@@ -146,7 +189,9 @@ async function loadFiles(newFiles) {
 async function getPdfPageCount(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
-  return pdf.numPages;
+  const count = pdf.numPages;
+  await pdf.destroy();
+  return count;
 }
 
 /**
@@ -182,6 +227,7 @@ async function generatePreviews(file, pageCount) {
     }
   }
   
+  await pdf.destroy();
   return previews;
 }
 
@@ -205,22 +251,22 @@ function renderFileList() {
       <div class="file-card__header">
         <div class="file-card__thumb">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2ZM16 18H8V16H16V18ZM16 14H8V12H16V14ZM13 9V3.5L18.5 9H13Z"/>
+            <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2ZM16 18H8V16H16V18ZM16 14H8V12H16V14ZM13 9V3.5L18.5 9H13Z" />
           </svg>
         </div>
         <div class="file-card__info">
           <div class="file-card__name">${escapeHtml(file.name)}</div>
           <div class="file-card__meta">${file.pageCount} pages</div>
         </div>
-        <button class="file-card__remove" onclick="window.removeFile('${file.id}')" aria-label="Remove ${escapeHtml(file.name)}">
+        <button class="file-card__remove" data-action="remove-file" data-file-id="${escapeHtml(file.id)}" aria-label="Remove ${escapeHtml(file.name)}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 19C6 20.1 6.9 21 8 21H16C17.1 21 18 20.1 18 19V7H6V19ZM19 4H15.5L14.5 3H9.5L8.5 4H5V6H19V4Z"/>
+            <path d="M6 19C6 20.1 6.9 21 8 21H16C17.1 21 18 20.1 18 19V7H6V19ZM19 4H15.5L14.5 3H9.5L8.5 4H5V6H19V4Z" />
           </svg>
         </button>
       </div>
       
       <!-- Preview thumbnails -->
-      <div class="file-preview" data-file-id="${file.id}" onclick="showPreview('${file.id}')">
+      <div class="file-preview" data-action="show-preview" data-file-id="${escapeHtml(file.id)}" role="button" tabindex="0" aria-label="Expand preview for ${escapeHtml(file.name)}">
         <div class="file-preview__thumbs">
           ${file.previews.slice(0, 5).map(p => `
             <div class="preview-thumb">
@@ -232,9 +278,9 @@ function renderFileList() {
         <div class="preview-thumb__label">Click to expand preview</div>
       </div>
       
-      <div class="ranges-container" data-file-id="${file.id}">
-        <div class="range-list" id="ranges-${file.id}"></div>
-        <button class="range-row__add" type="button" onclick="window.addRange('${file.id}')" aria-label="Add page range">
+      <div class="ranges-container" data-file-id="${escapeHtml(file.id)}">
+        <div class="range-list" id="ranges-${escapeHtml(file.id)}"></div>
+        <button class="range-row__add" type="button" data-action="add-range" data-file-id="${escapeHtml(file.id)}" aria-label="Add page range">
           + Add range
         </button>
       </div>
@@ -313,7 +359,7 @@ function renderRanges(file) {
       <span>-</span>
       <input type="number" class="range-row__input" data-field="end" value="${range.end}" min="1" max="${file.pageCount}" aria-label="End page">
       <span class="range-row__error" style="display: none;"></span>
-      ${file.ranges.length > 1 ? `<button class="range-item__remove" type="button" onclick="window.removeRange('${file.id}', '${rangeId}')" aria-label="Remove range">✕</button>` : ''}
+      ${file.ranges.length > 1 ? `<button class="range-item__remove" type="button" data-action="remove-range" data-file-id="${escapeHtml(file.id)}" data-range-id="${rangeId}" aria-label="Remove range">✕</button>` : ''}
     `;
     listEl.appendChild(row);
 
@@ -370,18 +416,18 @@ function renderRanges(file) {
 /**
  * Add a new range input row for a file
  */
-window.addRange = function(fileId) {
+function addRange(fileId) {
   const file = state.files.find(f => f.id === fileId);
   if (!file) return;
 
   file.ranges.push({ start: 1, end: file.pageCount });
   renderRanges(file);
-};
+}
 
 /**
  * Remove a range input row
  */
-window.removeRange = function(fileId, rangeId) {
+function removeRange(fileId, rangeId) {
   const file = state.files.find(f => f.id === fileId);
   if (!file) return;
 
@@ -399,18 +445,18 @@ window.removeRange = function(fileId, rangeId) {
   }
 
   renderRanges(file);
-};
+}
 
 /**
  * Remove a file from the list
  */
-window.removeFile = function(fileId) {
+function removeFile(fileId) {
   state.files = state.files.filter(f => f.id !== fileId);
   renderFileList();
   if (state.files.length === 0) {
     elements.previewArea.innerHTML = '';
   }
-};
+}
 
 /**
  * Handle split action with validation
@@ -521,9 +567,9 @@ function renderSplitResults(results) {
   
   results.forEach((result, idx) => {
     const downloadBtn = document.createElement('button');
-    downloadBtn.className = 'btn btn--primary';
-    downloadBtn.style.marginTop = '8px';
-    downloadBtn.onclick = () => downloadFile(idx);
+    downloadBtn.className = 'btn btn--primary split-result__download';
+    downloadBtn.setAttribute('data-download-idx', String(idx));
+    downloadBtn.setAttribute('aria-label', `Download ${result.name}, ${result.pages} pages`);
     downloadBtn.textContent = `Download ${result.name} (${result.pages} pages)`;
     elements.previewArea.appendChild(downloadBtn);
   });
@@ -532,7 +578,7 @@ function renderSplitResults(results) {
 /**
  * Download a split file
  */
-window.downloadFile = function(idx) {
+function downloadFile(idx) {
   const blobs = window.splitBlobs || [];
   const blob = blobs[idx];
   if (!blob) return;
@@ -544,8 +590,9 @@ window.downloadFile = function(idx) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+  // Revoke object URL after a short delay to ensure download starts
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 /**
  * Reset all files and results
@@ -554,6 +601,10 @@ function resetAll() {
   state.files = [];
   state.isProcessing = false;
   state.previewCanvases = [];
+  // Clean up any stored split blobs to free memory
+  if (window.splitBlobs) {
+    window.splitBlobs = null;
+  }
   elements.previewArea.innerHTML = '';
   elements.previewContainer.hidden = true;
   elements.fileInput.value = '';
