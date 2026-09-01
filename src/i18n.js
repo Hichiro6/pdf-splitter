@@ -138,7 +138,7 @@ export const TRANSLATIONS = {
     'dropzone.subtitle': 'of klik om een bestand te selecteren',
     'controls.split': 'Splitsen',
     'controls.ranges': 'Splitsingsbereiken',
-    'controls.pages': 'Pagina\'s',
+    'controls.pages': "Pagina's",
     'btn.split': 'PDF splitsen',
     'btn.download': 'Downloaden',
     'btn.reset': 'Opnieuw',
@@ -244,7 +244,7 @@ export function setLanguage(lang, callback) {
 
   try {
     localStorage.setItem(STORAGE_KEY, lang);
-  } catch (e) {
+  } catch (_e) {
     // localStorage might be unavailable (private browsing)
   }
 
@@ -312,7 +312,7 @@ export function initI18n() {
 
   try {
     savedLang = localStorage.getItem(STORAGE_KEY) || 'en';
-  } catch (e) {
+  } catch (_e) {
     // localStorage unavailable
   }
 

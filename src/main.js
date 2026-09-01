@@ -5,10 +5,10 @@
  */
 
 import '../styles/main.css';
+import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { PDFDocument } from 'pdf-lib';
-import { t, initI18n, getCurrentLanguage } from './i18n.js';
+import { initI18n } from './i18n.js';
 
 // Application state
 const state = {
@@ -141,7 +141,7 @@ function bindEvents() {
 function handleDrop(e) {
   e.preventDefault();
   elements.dropzone.classList.remove('dropzone--active');
-  const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+  const files = Array.from(e.dataTransfer.files).filter((f) => f.type === 'application/pdf');
   if (files.length > 0) loadFiles(files);
 }
 
@@ -149,7 +149,7 @@ function handleDrop(e) {
  * Handle file selection
  */
 function handleFileSelect(e) {
-  const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
+  const files = Array.from(e.target.files).filter((f) => f.type === 'application/pdf');
   if (files.length > 0) loadFiles(files);
   elements.fileInput.value = '';
 }
@@ -162,10 +162,10 @@ async function loadFiles(newFiles) {
     try {
       const pageCount = await getPdfPageCount(file);
       const fileId = `file-${state.nextId++}`;
-      
+
       // Generate preview canvases for this PDF
       const previews = await generatePreviews(file, pageCount);
-      
+
       state.files.push({
         id: fileId,
         file,
@@ -201,32 +201,32 @@ async function generatePreviews(file, pageCount) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
   const previews = [];
-  
+
   // Render only first few pages to avoid performance issues
   const maxPreviewPages = Math.min(pageCount, 10);
-  
+
   for (let pageNum = 1; pageNum <= maxPreviewPages; pageNum++) {
     try {
       const page = await pdf.getPage(pageNum);
       const scale = 0.5; // Thumbnail scale
       const viewport = page.getViewport({ scale });
-      
+
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      
+
       await page.render({
         canvasContext: context,
-        viewport: viewport
+        viewport: viewport,
       }).promise;
-      
+
       previews.push({ pageNum, canvas });
     } catch (err) {
       console.warn(`Failed to render preview for page ${pageNum}:`, err);
     }
   }
-  
+
   await pdf.destroy();
   return previews;
 }
@@ -246,7 +246,9 @@ function renderFileList() {
   elements.dropzone.hidden = true;
   elements.splitBtn.disabled = false;
 
-  elements.fileList.innerHTML = state.files.map(file => `
+  elements.fileList.innerHTML = state.files
+    .map(
+      (file) => `
     <div class="file-card" data-file-id="${escapeHtml(file.id)}">
       <div class="file-card__header">
         <div class="file-card__thumb">
@@ -268,11 +270,16 @@ function renderFileList() {
       <!-- Preview thumbnails -->
       <div class="file-preview" data-action="show-preview" data-file-id="${escapeHtml(file.id)}" role="button" tabindex="0" aria-label="Expand preview for ${escapeHtml(file.name)}">
         <div class="file-preview__thumbs">
-          ${file.previews.slice(0, 5).map(p => `
+          ${file.previews
+            .slice(0, 5)
+            .map(
+              (p) => `
             <div class="preview-thumb">
               <canvas width="${p.canvas.width}" height="${p.canvas.height}"></canvas>
             </div>
-          `).join('')}
+          `,
+            )
+            .join('')}
           ${file.pageCount > 5 ? `<div class="preview-thumb preview-thumb--more">+${file.pageCount - 5}</div>` : ''}
         </div>
         <div class="preview-thumb__label">Click to expand preview</div>
@@ -285,11 +292,15 @@ function renderFileList() {
         </button>
       </div>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 
   // Copy preview canvases
-  state.files.forEach(file => {
-    const thumbs = elements.fileList.querySelectorAll(`.file-card[data-file-id="${file.id}"] .preview-thumb canvas`);
+  state.files.forEach((file) => {
+    const thumbs = elements.fileList.querySelectorAll(
+      `.file-card[data-file-id="${file.id}"] .preview-thumb canvas`,
+    );
     file.previews.slice(0, Math.min(thumbs.length, 5)).forEach((p, i) => {
       if (thumbs[i]) {
         thumbs[i].getContext('2d').drawImage(p.canvas, 0, 0);
@@ -298,7 +309,7 @@ function renderFileList() {
   });
 
   // Render initial ranges for each file
-  state.files.forEach(file => {
+  state.files.forEach((file) => {
     renderRanges(file);
   });
 
@@ -312,26 +323,26 @@ function renderFileList() {
  * Show preview for a specific file
  */
 function showPreview(fileId) {
-  const file = state.files.find(f => f.id === fileId);
+  const file = state.files.find((f) => f.id === fileId);
   if (!file) return;
 
   elements.previewContainer.hidden = false;
   elements.previewFilename.textContent = `${file.name} (${file.pageCount} pages)`;
   elements.previewArea.innerHTML = '';
 
-  file.previews.forEach(preview => {
+  file.previews.forEach((preview) => {
     const wrapper = document.createElement('div');
     wrapper.className = 'preview-page-wrapper';
-    
+
     const pageInfo = document.createElement('span');
     pageInfo.className = 'preview-page-number';
     pageInfo.textContent = `Page ${preview.pageNum}`;
-    
+
     const canvas = document.createElement('canvas');
     canvas.width = preview.canvas.width;
     canvas.height = preview.canvas.height;
     canvas.getContext('2d').drawImage(preview.canvas, 0, 0);
-    
+
     wrapper.appendChild(pageInfo);
     wrapper.appendChild(canvas);
     elements.previewArea.appendChild(wrapper);
@@ -373,11 +384,11 @@ function renderRanges(file) {
       const end = parseInt(endInput.value, 10);
       let errorMessage = '';
 
-      if (isNaN(start) || start < 1) {
+      if (Number.isNaN(start) || start < 1) {
         errorMessage = 'Start must be ≥ 1';
       } else if (start > file.pageCount) {
         errorMessage = `Start cannot exceed ${file.pageCount} pages`;
-      } else if (isNaN(end) || end < 1) {
+      } else if (Number.isNaN(end) || end < 1) {
         errorMessage = 'End must be ≥ 1';
       } else if (end > file.pageCount) {
         errorMessage = `End cannot exceed ${file.pageCount} pages`;
@@ -417,7 +428,7 @@ function renderRanges(file) {
  * Add a new range input row for a file
  */
 function addRange(fileId) {
-  const file = state.files.find(f => f.id === fileId);
+  const file = state.files.find((f) => f.id === fileId);
   if (!file) return;
 
   file.ranges.push({ start: 1, end: file.pageCount });
@@ -428,7 +439,7 @@ function addRange(fileId) {
  * Remove a range input row
  */
 function removeRange(fileId, rangeId) {
-  const file = state.files.find(f => f.id === fileId);
+  const file = state.files.find((f) => f.id === fileId);
   if (!file) return;
 
   // Parse index from rangeId format "range-{fileId}-{idx}"
@@ -451,7 +462,7 @@ function removeRange(fileId, rangeId) {
  * Remove a file from the list
  */
 function removeFile(fileId) {
-  state.files = state.files.filter(f => f.id !== fileId);
+  state.files = state.files.filter((f) => f.id !== fileId);
   renderFileList();
   if (state.files.length === 0) {
     elements.previewArea.innerHTML = '';
@@ -466,11 +477,17 @@ async function handleSplit() {
 
   // Validate all ranges first
   let hasErrors = false;
-  state.files.forEach(file => {
-    file.ranges.forEach((range, idx) => {
+  state.files.forEach((file) => {
+    file.ranges.forEach((range, _idx) => {
       const start = parseInt(range.start, 10);
       const end = parseInt(range.end, 10);
-      if (isNaN(start) || isNaN(end) || start < 1 || end > file.pageCount || start > end) {
+      if (
+        Number.isNaN(start) ||
+        Number.isNaN(end) ||
+        start < 1 ||
+        end > file.pageCount ||
+        start > end
+      ) {
         hasErrors = true;
       }
     });
@@ -534,7 +551,9 @@ async function splitPdfFile(file) {
     }
 
     const copiedPages = await newDoc.copyPages(srcDoc, pageIndexes);
-    copiedPages.forEach(page => newDoc.addPage(page));
+    for (const page of copiedPages) {
+      newDoc.addPage(page);
+    }
 
     const pdfBytes = await newDoc.save();
     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -556,7 +575,7 @@ async function splitPdfFile(file) {
 function renderSplitResults(results) {
   // Store blobs for download
   window.splitBlobs = results;
-  
+
   // Show success message in preview area
   elements.previewArea.innerHTML = `
     <div class="split-success">
@@ -564,7 +583,7 @@ function renderSplitResults(results) {
       <p>Each range has been split into a separate PDF.</p>
     </div>
   `;
-  
+
   results.forEach((result, idx) => {
     const downloadBtn = document.createElement('button');
     downloadBtn.className = 'btn btn--primary split-result__download';

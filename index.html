@@ -38,7 +38,7 @@
     </header>
 
     <!-- Drop zone -->
-    <section class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Upload PDF file">
+    <section class="dropzone" id="dropzone" aria-label="Upload PDF file">
       <div class="dropzone__inner">
         <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <path d="M32 44V20M32 20L22 30M32 20L42 30" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -66,9 +66,9 @@
       <!-- File list & Controls (right) -->
       <div class="workspace__controls-panel">
         <!-- File list -->
-        <div class="file-list" id="file-list" role="list" aria-label="Uploaded files">
+        <ul class="file-list" id="file-list" aria-label="Uploaded files">
           <!-- File cards generated dynamically -->
-        </div>
+        </ul>
 
         <!-- Controls -->
         <div class="controls">
@@ -81,14 +81,14 @@
               <p style="font-size: 0.85rem; color: var(--text-tertiary); margin-bottom: 12px;">
                 Define page ranges for each file. Each range creates a separate PDF.
               </p>
-              <button class="btn btn--primary btn--full-width" id="btn-split" disabled aria-label="Split PDF">
+              <button type="button" class="btn btn--primary btn--full-width" id="btn-split" disabled aria-label="Split PDF">
                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
                   <path d="M6 3V15M12 3V15M3 6H9M9 12H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <span data-i18n="btn.split">Split PDF</span>
               </button>
 
-              <button class="btn btn--secondary btn--full-width" id="btn-reset" style="margin-top: 8px;" aria-label="Reset all files">
+              <button type="button" class="btn btn--secondary btn--full-width" id="btn-reset" style="margin-top: 8px;" aria-label="Reset all files">
                 <span data-i18n="btn.reset">Reset</span>
               </button>
             </div>
